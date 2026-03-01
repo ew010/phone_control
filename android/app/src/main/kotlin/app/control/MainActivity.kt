@@ -210,7 +210,9 @@ class MainActivity : FlutterActivity() {
             pb.redirectErrorStream(true)
             pb.environment()["HOME"] = applicationContext.filesDir.absolutePath
             val process = pb.start()
-            process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            output
         } catch (e: Exception) {
             ""
         }
@@ -371,8 +373,16 @@ private class ScrcpySessionWithAdb(
         serverSocket = ServerSocket(port)
         serverSocket?.reuseAddress = true
         serverSocket?.soTimeout = 10000
-        socket = serverSocket?.accept()
-        val clientSocket = socket ?: return null
+        try {
+            socket = serverSocket?.accept()
+        } catch (e: Exception) {
+            serverSocket?.close()
+            return null
+        }
+        val clientSocket = socket ?: run {
+            serverSocket?.close()
+            return null
+        }
         val input = BufferedInputStream(clientSocket.getInputStream())
         val meta = ByteArray(12)
         if (!readFully(input, meta)) return null
@@ -484,10 +494,16 @@ private class ScrcpyVideoDecoder(
         running.set(false)
         try {
             thread?.join(500)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
         }
-        codec?.stop()
-        codec?.release()
+        try {
+            codec?.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            codec?.release()
+        } catch (_: Exception) {
+        }
         codec = null
     }
 
