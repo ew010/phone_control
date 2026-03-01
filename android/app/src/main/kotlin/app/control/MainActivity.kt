@@ -16,6 +16,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.net.ServerSocket
+import java.net.Socket
 import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -309,10 +310,6 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             Pair(false, "配对失败: ${e.message}")
         }
-    }
-
-    private fun findAdbBinary(): String? {
-        return null
     }
 }
 
