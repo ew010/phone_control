@@ -210,9 +210,13 @@ class MainActivity : FlutterActivity() {
             pb.redirectErrorStream(true)
             pb.environment()["HOME"] = applicationContext.filesDir.absolutePath
             val process = pb.start()
-            val output = process.inputStream.bufferedReader().readText()
-            process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
-            output
+            // 先等待进程完成（带超时），再读取输出
+            val finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                return ""
+            }
+            process.inputStream.bufferedReader().readText()
         } catch (e: Exception) {
             ""
         }
@@ -429,6 +433,12 @@ private class ScrcpySessionWithAdb(
             pb.redirectErrorStream(true)
             pb.environment()["HOME"] = workingDir.absolutePath
             val process = pb.start()
+            // 先等待进程完成（带超时），再读取输出
+            val finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                return ""
+            }
             process.inputStream.bufferedReader().readText()
         } catch (e: Exception) {
             ""
