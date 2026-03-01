@@ -33,16 +33,11 @@ import java.security.KeyPairGenerator
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.Signature
-import java.security.cert.X509Certificate
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicBoolean
-import javax.net.ssl.SSLContext
-import javax.net.ssl.SSLSocket
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
 import kotlin.math.min
 
 class MainActivity : FlutterActivity() {
@@ -669,81 +664,48 @@ private fun DataOutputStream.writeIntLE(value: Int) {
 
 private object AdbPairing {
     fun pair(host: String, port: Int, code: String, context: Context): Pair<Boolean, String> {
-        return try {
-            val keyPair = getOrCreateKeys(context)
-            
-            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
-                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-            })
-            
-            val sslContext = SSLContext.getInstance("TLS")
-            sslContext.init(null, trustAllCerts, null)
-            
-            val socket = sslContext.socketFactory.createSocket(host, port) as SSLSocket
-            socket.soTimeout = 10000
-            socket.startHandshake()
-            
-            val outputStream = socket.getOutputStream()
-            val inputStream = socket.getInputStream()
-            
-            val header = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
-            header.putInt(0)
-            header.putInt(code.length)
-            outputStream.write(header.array())
-            outputStream.write(code.toByteArray())
-            outputStream.flush()
-            
-            val responseHeader = ByteArray(8)
-            val readLen = inputStream.read(responseHeader)
-            if (readLen < 8) {
-                socket.close()
-                return Pair(false, "响应不完整")
-            }
-            
-            val responseBuf = ByteBuffer.wrap(responseHeader).order(ByteOrder.LITTLE_ENDIAN)
-            val responseType = responseBuf.int
-            val responseLen = responseBuf.int
-            
-            if (responseType == 0 && responseLen > 0) {
-                val peerInfo = ByteArray(responseLen)
-                inputStream.read(peerInfo)
-                
-                val publicKey = keyPair.public.encoded
-                val keyHeader = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
-                keyHeader.putInt(1)
-                keyHeader.putInt(publicKey.size)
-                outputStream.write(keyHeader.array())
-                outputStream.write(publicKey)
-                outputStream.flush()
-                
-                socket.close()
-                Pair(true, "配对成功")
-            } else {
-                socket.close()
-                Pair(false, "配对被拒绝，请检查配对码是否正确")
-            }
-        } catch (e: Exception) {
-            Pair(false, e.message ?: "连接失败")
+        val adbPath = findAdbBinary()
+        
+        if (adbPath != null) {
+            return pairWithAdb(adbPath, host, port, code)
         }
+        
+        return Pair(false, "此设备没有adb工具，请手动配对：\n1. 在电脑上安装adb\n2. 运行: adb pair $host:$port\n3. 输入配对码: $code\n4. 配对成功后在此App点击连接")
     }
     
-    private fun getOrCreateKeys(context: Context): KeyPair {
-        val privateFile = File(context.filesDir, "adbkey")
-        val publicFile = File(context.filesDir, "adbkey.pub")
-        
-        if (privateFile.exists() && publicFile.exists()) {
-            val privateKey = KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(privateFile.readBytes()))
-            val publicKey = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(publicFile.readBytes()))
-            return KeyPair(publicKey, privateKey)
+    private fun findAdbBinary(): String? {
+        val candidates = listOf(
+            "/system/bin/adb",
+            "/system/xbin/adb",
+            "/vendor/bin/adb",
+            "/data/local/tmp/adb"
+        )
+        for (path in candidates) {
+            val file = File(path)
+            if (file.exists() && file.canExecute()) {
+                return file.absolutePath
+            }
         }
-        
-        val generator = KeyPairGenerator.getInstance("RSA")
-        generator.initialize(2048)
-        val pair = generator.generateKeyPair()
-        privateFile.writeBytes(pair.private.encoded)
-        publicFile.writeBytes(pair.public.encoded)
-        return pair
+        return null
+    }
+    
+    private fun pairWithAdb(adbPath: String, host: String, port: Int, code: String): Pair<Boolean, String> {
+        return try {
+            val address = "$host:$port"
+            val process = ProcessBuilder(adbPath, "pair", address, code)
+                .redirectErrorStream(true)
+                .start()
+            
+            val output = process.inputStream.bufferedReader().readText().trim()
+            val exitCode = process.waitFor()
+            
+            if (exitCode == 0 || output.contains("Successfully paired", ignoreCase = true)) {
+                Pair(true, "配对成功")
+            } else {
+                Pair(false, if (output.isEmpty()) "配对失败" else output)
+            }
+        } catch (e: Exception) {
+            Pair(false, "配对失败: ${e.message}")
+        }
     }
 }
