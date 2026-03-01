@@ -176,8 +176,15 @@ class MainActivity : FlutterActivity() {
             pb.environment()["ANDROID_SDK_ROOT"] = applicationContext.filesDir.absolutePath
             
             val process = pb.start()
+            // 先等待进程完成（带超时），再读取输出
+            val finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                logBuilder.appendLine("连接超时")
+                return Pair(false, logBuilder.toString())
+            }
             val output = process.inputStream.bufferedReader().readText().trim()
-            val exitCode = process.waitFor()
+            val exitCode = process.exitValue()
             
             logBuilder.appendLine("adb输出: $output")
             logBuilder.appendLine("退出码: $exitCode")
