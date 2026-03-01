@@ -587,8 +587,14 @@ private object AdbPairing {
             pb.environment()["ADB_TRACE"] = "0"
             
             val process = pb.start()
+            // 先等待进程完成（带超时），再读取输出
+            val finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                return Pair(false, "配对超时")
+            }
             val output = process.inputStream.bufferedReader().readText().trim()
-            val exitCode = process.waitFor()
+            val exitCode = process.exitValue()
             
             if (exitCode == 0 || output.contains("Successfully paired", ignoreCase = true)) {
                 Pair(true, "配对成功")
