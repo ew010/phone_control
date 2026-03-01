@@ -31,7 +31,7 @@ class ControlHomePage extends StatefulWidget {
 class _ControlHomePageState extends State<ControlHomePage> {
   final _controller = AdbScrcpyController();
   final _hostController = TextEditingController(text: '192.168.0.100');
-  final _portController = TextEditingController(text: '5555');
+  final _portController = TextEditingController();
   final _pairHostController = TextEditingController(text: '192.168.0.100');
   final _pairPortController = TextEditingController(text: '37099');
   final _pairCodeController = TextEditingController();
@@ -126,8 +126,8 @@ class _ControlHomePageState extends State<ControlHomePage> {
     setState(() {
       if (result == '配对成功') {
         _hostController.text = host;
-        _portController.text = '5555';
-        _status = '配对成功，调试端口默认为5555，如连接失败请检查设备端口';
+        _portController.clear();
+        _status = '配对成功！请查看设备上"无线调试"页面显示的端口号，填入上方端口框';
       } else {
         _status = result;
       }
@@ -257,11 +257,14 @@ class _ControlHomePageState extends State<ControlHomePage> {
                         ),
                       ),
                       SizedBox(
-                        width: 100,
+                        width: 120,
                         child: TextField(
                           controller: _portController,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: '端口'),
+                          decoration: const InputDecoration(
+                            labelText: '调试端口',
+                            hintText: '设备上显示的端口',
+                          ),
                         ),
                       ),
                       ElevatedButton(
