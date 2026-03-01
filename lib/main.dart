@@ -167,22 +167,25 @@ class _ControlHomePageState extends State<ControlHomePage> {
       body: SafeArea(
         child: Column(
           children: [
-            Padding(
+            SingleChildScrollView(
               padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(_status, style: Theme.of(context).textTheme.bodyMedium),
                   const SizedBox(height: 8),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.end,
                     children: [
-                      Expanded(
+                      SizedBox(
+                        width: 160,
                         child: TextField(
                           controller: _hostController,
                           decoration: const InputDecoration(labelText: '目标IP'),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       SizedBox(
                         width: 100,
                         child: TextField(
@@ -191,7 +194,6 @@ class _ControlHomePageState extends State<ControlHomePage> {
                           decoration: const InputDecoration(labelText: '端口'),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: _connected ? _disconnect : _connect,
                         child: Text(_connected ? '断开' : '连接'),
@@ -199,33 +201,34 @@ class _ControlHomePageState extends State<ControlHomePage> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.end,
                     children: [
-                      Expanded(
+                      SizedBox(
+                        width: 160,
                         child: TextField(
                           controller: _pairHostController,
                           decoration: const InputDecoration(labelText: '配对IP'),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       SizedBox(
-                        width: 110,
+                        width: 100,
                         child: TextField(
                           controller: _pairPortController,
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(labelText: '配对端口'),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       SizedBox(
-                        width: 140,
+                        width: 100,
                         child: TextField(
                           controller: _pairCodeController,
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(labelText: '配对码'),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: _pair,
                         child: const Text('配对'),
@@ -233,38 +236,38 @@ class _ControlHomePageState extends State<ControlHomePage> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.end,
                     children: [
                       SizedBox(
-                        width: 110,
+                        width: 100,
                         child: TextField(
                           controller: _maxSizeController,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: '最大分辨率'),
+                          decoration: const InputDecoration(labelText: '分辨率'),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       SizedBox(
-                        width: 110,
+                        width: 80,
                         child: TextField(
                           controller: _maxFpsController,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: '最大FPS'),
+                          decoration: const InputDecoration(labelText: 'FPS'),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       SizedBox(
-                        width: 130,
+                        width: 100,
                         child: TextField(
                           controller: _bitRateController,
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(labelText: '码率'),
                         ),
                       ),
-                      const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: _streaming ? _stopMirror : (_connected ? _startMirror : null),
-                        child: Text(_streaming ? '停止镜像' : '启动镜像'),
+                        child: Text(_streaming ? '停止' : '镜像'),
                       ),
                     ],
                   ),
@@ -322,11 +325,13 @@ class _ControlHomePageState extends State<ControlHomePage> {
                 },
               ),
             ),
-            Padding(
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
-                  Expanded(
+                  SizedBox(
+                    width: 200,
                     child: TextField(
                       controller: _textController,
                       decoration: const InputDecoration(labelText: '输入文本'),
