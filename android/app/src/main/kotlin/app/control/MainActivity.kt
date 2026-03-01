@@ -670,7 +670,7 @@ private object AdbPairing {
             return Pair(false, "无法获取adb工具")
         }
         
-        return pairWithAdb(adbPath, host, port, code)
+        return pairWithAdb(adbPath, host, port, code, context)
     }
     
     private fun getAdbBinary(context: Context): String? {
@@ -700,13 +700,17 @@ private object AdbPairing {
         return if (adbFile.canExecute()) adbFile.absolutePath else null
     }
     
-    private fun pairWithAdb(adbPath: String, host: String, port: Int, code: String): Pair<Boolean, String> {
+    private fun pairWithAdb(adbPath: String, host: String, port: Int, code: String, context: Context): Pair<Boolean, String> {
         return try {
             val address = "$host:$port"
-            val process = ProcessBuilder(adbPath, "pair", address, code)
-                .redirectErrorStream(true)
-                .start()
+            val pb = ProcessBuilder(adbPath, "pair", address, code)
+            pb.directory(context.filesDir)
+            pb.redirectErrorStream(true)
+            pb.environment()["HOME"] = context.filesDir.absolutePath
+            pb.environment()["ANDROID_SDK_ROOT"] = context.filesDir.absolutePath
+            pb.environment()["ADB_TRACE"] = "0"
             
+            val process = pb.start()
             val output = process.inputStream.bufferedReader().readText().trim()
             val exitCode = process.waitFor()
             
