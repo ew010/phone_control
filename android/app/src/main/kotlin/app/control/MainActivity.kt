@@ -163,37 +163,90 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun connectToDevice(host: String, port: Int): Boolean {
-        return try {
-            val connection = AdbConnection(host, port, applicationContext)
-            connection.connect()
-            adbConnection?.close()
-            adbConnection = connection
-            true
-        } catch (e: Exception) {
-            Log.e("AdbConnection", "连接失败: ${e.message}", e)
-            false
-        }
+        val (_, log) = connectWithAdbBinary(host, port)
+        return log.contains("connected", ignoreCase = true) || log.contains("already connected", ignoreCase = true)
     }
 
     private fun connectToDeviceWithLog(host: String, port: Int): Pair<Boolean, String> {
+        val (success, log) = connectWithAdbBinary(host, port)
+        return Pair(success, log)
+    }
+
+    private fun connectWithAdbBinary(host: String, port: Int): Pair<Boolean, String> {
         val logBuilder = StringBuilder()
-        logBuilder.appendLine("开始连接 $host:$port")
+        logBuilder.appendLine("使用adb二进制文件连接 $host:$port")
+        
+        val adbPath = getAdbBinaryPath(applicationContext)
+        if (adbPath == null) {
+            val error = "无法获取adb工具"
+            logBuilder.appendLine(error)
+            return Pair(false, logBuilder.toString())
+        }
+        
         return try {
-            val connection = AdbConnection(host, port, applicationContext) { msg ->
-                logBuilder.appendLine(msg)
-                Log.d("AdbConnection", msg)
+            val address = "$host:$port"
+            val pb = ProcessBuilder(adbPath, "connect", address)
+            pb.directory(applicationContext.filesDir)
+            pb.redirectErrorStream(true)
+            pb.environment()["HOME"] = applicationContext.filesDir.absolutePath
+            pb.environment()["ANDROID_SDK_ROOT"] = applicationContext.filesDir.absolutePath
+            
+            val process = pb.start()
+            val output = process.inputStream.bufferedReader().readText().trim()
+            val exitCode = process.waitFor()
+            
+            logBuilder.appendLine("adb输出: $output")
+            logBuilder.appendLine("退出码: $exitCode")
+            
+            val success = output.contains("connected", ignoreCase = true) || 
+                         output.contains("already connected", ignoreCase = true)
+            
+            if (success) {
+                // 创建AdbConnection用于后续shell命令
+                try {
+                    val connection = AdbConnection(host, port, applicationContext)
+                    connection.connect()
+                    adbConnection?.close()
+                    adbConnection = connection
+                    logBuilder.appendLine("内部ADB连接已建立")
+                } catch (e: Exception) {
+                    logBuilder.appendLine("警告: 内部ADB连接失败: ${e.message}")
+                }
             }
-            connection.connect()
-            adbConnection?.close()
-            adbConnection = connection
-            logBuilder.appendLine("连接成功")
-            Pair(true, logBuilder.toString())
+            
+            Pair(success, logBuilder.toString())
         } catch (e: Exception) {
-            val errorMsg = "连接失败: ${e.message ?: e.javaClass.simpleName}"
+            val errorMsg = "连接失败: ${e.message}"
             logBuilder.appendLine(errorMsg)
-            Log.e("AdbConnection", errorMsg, e)
             Pair(false, logBuilder.toString())
         }
+    }
+    
+    private fun getAdbBinaryPath(context: Context): String? {
+        val abi = Build.SUPPORTED_ABIS[0]
+        val assetName = when {
+            abi.contains("arm64") -> "adb-arm64"
+            abi.contains("arm") -> "adb-arm"
+            else -> return null
+        }
+        
+        val adbFile = File(context.filesDir, "adb")
+        
+        if (!adbFile.exists() || adbFile.length() == 0L) {
+            try {
+                context.assets.open(assetName).use { input ->
+                    adbFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                adbFile.setExecutable(true, false)
+                adbFile.setReadable(true, false)
+            } catch (e: Exception) {
+                return null
+            }
+        }
+        
+        return if (adbFile.canExecute()) adbFile.absolutePath else null
     }
 
     private fun startMirrorInternal(maxSize: Int, maxFps: Int, bitRate: Int): Map<String, Any>? {
