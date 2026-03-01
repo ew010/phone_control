@@ -604,10 +604,9 @@ private class AdbConnection(
 
     private fun getOrCreateKeys(): KeyPair {
         if (keyPair != null) return keyPair!!
-        val androidDir = File(context.filesDir, ".android")
-        if (!androidDir.exists()) androidDir.mkdirs()
-        val privateFile = File(androidDir, "adbkey")
-        val publicFile = File(androidDir, "adbkey.pub")
+        // 使用与系统 adb 相同的密钥路径 (context.filesDir，不是 .android 子目录)
+        val privateFile = File(context.filesDir, "adbkey")
+        val publicFile = File(context.filesDir, "adbkey.pub")
         if (privateFile.exists() && publicFile.exists()) {
             val privateKey = KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(privateFile.readBytes()))
             val publicKey = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(publicFile.readBytes()))
