@@ -336,7 +336,10 @@ private class ScrcpySessionWithAdb(
         val port = 27183
         
         // 使用adb push推送文件
-        runAdb(arrayOf("push", scrcpyJar.absolutePath, "/data/local/tmp/scrcpy-server.jar"))
+        val pushResult = runAdb(arrayOf("push", scrcpyJar.absolutePath, "/data/local/tmp/scrcpy-server.jar"))
+        if (pushResult.contains("error", ignoreCase = true)) {
+            return null
+        }
         
         // 使用adb reverse设置端口转发
         runAdb(arrayOf("reverse", "localabstract:scrcpy", "tcp:$port"))
@@ -369,7 +372,8 @@ private class ScrcpySessionWithAdb(
         serverSocket?.reuseAddress = true
         serverSocket?.soTimeout = 10000
         socket = serverSocket?.accept()
-        val input = BufferedInputStream(socket!!.getInputStream())
+        val clientSocket = socket ?: return null
+        val input = BufferedInputStream(clientSocket.getInputStream())
         val meta = ByteArray(12)
         if (!readFully(input, meta)) return null
         val metaBuf = ByteBuffer.wrap(meta).order(ByteOrder.BIG_ENDIAN)
@@ -443,14 +447,18 @@ private class ScrcpyVideoDecoder(
         running.set(true)
         thread = Thread {
             val header = ByteArray(12)
-            val buffer = ByteArray(1024 * 1024)
+            var buffer = ByteArray(1024 * 1024)
             while (running.get()) {
                 if (!readFully(header)) break
                 val headerBuf = ByteBuffer.wrap(header).order(ByteOrder.BIG_ENDIAN)
                 headerBuf.long
                 val packetSize = headerBuf.int
-                if (packetSize <= 0 || packetSize > buffer.size) {
+                if (packetSize <= 0) {
                     break
+                }
+                // 动态扩容buffer
+                if (packetSize > buffer.size) {
+                    buffer = ByteArray(packetSize)
                 }
                 if (!readFully(buffer, packetSize)) break
                 val codecRef = codec ?: break
