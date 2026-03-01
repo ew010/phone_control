@@ -1,4 +1,4 @@
-package com.example.adb_phone_control
+package app.control
 
 import android.content.Context
 import android.graphics.SurfaceTexture
