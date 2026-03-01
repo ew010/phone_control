@@ -33,11 +33,16 @@ import java.security.KeyPairGenerator
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.Signature
+import java.security.cert.X509Certificate
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 import kotlin.math.min
 
 class MainActivity : FlutterActivity() {
@@ -666,8 +671,19 @@ private object AdbPairing {
     fun pair(host: String, port: Int, code: String, context: Context): Pair<Boolean, String> {
         return try {
             val keyPair = getOrCreateKeys(context)
-            val socket = Socket(host, port)
+            
+            val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+            })
+            
+            val sslContext = SSLContext.getInstance("TLS")
+            sslContext.init(null, trustAllCerts, null)
+            
+            val socket = sslContext.socketFactory.createSocket(host, port) as SSLSocket
             socket.soTimeout = 10000
+            socket.startHandshake()
             
             val outputStream = socket.getOutputStream()
             val inputStream = socket.getInputStream()
@@ -680,7 +696,12 @@ private object AdbPairing {
             outputStream.flush()
             
             val responseHeader = ByteArray(8)
-            inputStream.read(responseHeader)
+            val readLen = inputStream.read(responseHeader)
+            if (readLen < 8) {
+                socket.close()
+                return Pair(false, "响应不完整")
+            }
+            
             val responseBuf = ByteBuffer.wrap(responseHeader).order(ByteOrder.LITTLE_ENDIAN)
             val responseType = responseBuf.int
             val responseLen = responseBuf.int
@@ -701,7 +722,7 @@ private object AdbPairing {
                 Pair(true, "配对成功")
             } else {
                 socket.close()
-                Pair(false, "配对被拒绝")
+                Pair(false, "配对被拒绝，请检查配对码是否正确")
             }
         } catch (e: Exception) {
             Pair(false, e.message ?: "连接失败")
