@@ -11,6 +11,7 @@ import androidx.annotation.RequiresApi
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.PluginRegistry
 import io.flutter.view.TextureRegistry
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -44,11 +45,11 @@ class MainActivity : FlutterActivity() {
     private var adbConnection: AdbConnection? = null
     private var scrcpySession: ScrcpySession? = null
     private lateinit var channel: MethodChannel
-    private var flutterEngineInstance: FlutterEngine? = null
+    private var textureRegistry: TextureRegistry? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        flutterEngineInstance = flutterEngine
+        textureRegistry = flutterEngine.renderer
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "adb_phone_control")
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -166,8 +167,7 @@ class MainActivity : FlutterActivity() {
         val connection = adbConnection ?: return null
         if (scrcpySession != null) return null
         val scrcpyJar = ensureScrcpyServer(applicationContext) ?: return null
-        val engine = flutterEngineInstance ?: return null
-        val textureRegistry = engine.platformViewsController.registry
+        val textureRegistry = this.textureRegistry ?: return null
         return try {
             val session = ScrcpySession(
                 textureRegistry,
