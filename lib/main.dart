@@ -99,6 +99,9 @@ class _ControlHomePageState extends State<ControlHomePage> {
     if (!mounted) return;
     setState(() {
       _status = result;
+      if (result == '配对成功') {
+        _hostController.text = host;
+      }
     });
   }
 
