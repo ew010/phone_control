@@ -6,6 +6,7 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
 import android.util.Base64
+import android.util.Log
 import android.view.Surface
 import androidx.annotation.RequiresApi
 import io.flutter.embedding.android.FlutterActivity
@@ -59,6 +60,16 @@ class MainActivity : FlutterActivity() {
                     executor.submit {
                         val success = connectToDevice(host, port)
                         runOnUiThread { result.success(success) }
+                    }
+                }
+                "connectWithLog" -> {
+                    val host = call.argument<String>("host") ?: ""
+                    val port = call.argument<Int>("port") ?: 5555
+                    executor.submit {
+                        val (success, log) = connectToDeviceWithLog(host, port)
+                        runOnUiThread {
+                            result.success(mapOf("success" to success, "log" to log))
+                        }
                     }
                 }
                 "disconnect" -> {
@@ -159,7 +170,29 @@ class MainActivity : FlutterActivity() {
             adbConnection = connection
             true
         } catch (e: Exception) {
+            Log.e("AdbConnection", "连接失败: ${e.message}", e)
             false
+        }
+    }
+
+    private fun connectToDeviceWithLog(host: String, port: Int): Pair<Boolean, String> {
+        val logBuilder = StringBuilder()
+        logBuilder.appendLine("开始连接 $host:$port")
+        return try {
+            val connection = AdbConnection(host, port, applicationContext) { msg ->
+                logBuilder.appendLine(msg)
+                Log.d("AdbConnection", msg)
+            }
+            connection.connect()
+            adbConnection?.close()
+            adbConnection = connection
+            logBuilder.appendLine("连接成功")
+            Pair(true, logBuilder.toString())
+        } catch (e: Exception) {
+            val errorMsg = "连接失败: ${e.message ?: e.javaClass.simpleName}"
+            logBuilder.appendLine(errorMsg)
+            Log.e("AdbConnection", errorMsg, e)
+            Pair(false, logBuilder.toString())
         }
     }
 
@@ -396,7 +429,8 @@ private class ScrcpyVideoDecoder(
 private class AdbConnection(
     private val host: String,
     private val port: Int,
-    private val context: Context
+    private val context: Context,
+    private val logCallback: ((String) -> Unit)? = null
 ) {
     private var socket: Socket? = null
     private var input: DataInputStream? = null
@@ -406,22 +440,40 @@ private class AdbConnection(
     private var remoteId = 0
     private var keyPair: KeyPair? = null
 
+    private fun log(msg: String) {
+        logCallback?.invoke(msg)
+        Log.d("AdbConnection", msg)
+    }
+
     fun connect() {
         synchronized(lock) {
+            log("开始连接 $host:$port")
             socket = Socket(host, port)
             socket?.tcpNoDelay = true
+            socket?.soTimeout = 10000
             input = DataInputStream(BufferedInputStream(socket!!.getInputStream()))
             output = DataOutputStream(BufferedOutputStream(socket!!.getOutputStream()))
+            log("TCP连接成功，发送CNXN")
             sendPacket(AdbCommand.CNXN, 0x01000000, 4096, "host::\u0000".toByteArray())
+            var authAttempts = 0
             while (true) {
                 val packet = readPacket()
+                log("收到包: command=${packet.command.toString(16)}, arg0=${packet.arg0}")
                 when (packet.command) {
-                    AdbCommand.AUTH -> handleAuth(packet)
+                    AdbCommand.AUTH -> {
+                        authAttempts++
+                        log("认证请求 #$authAttempts, type=${packet.arg0}")
+                        if (authAttempts > 3) throw IllegalStateException("认证失败，次数过多")
+                        handleAuth(packet)
+                    }
                     AdbCommand.CNXN -> {
                         remoteId = packet.arg0
+                        log("连接成功，remoteId=$remoteId")
                         return
                     }
-                    else -> {}
+                    else -> {
+                        log("未知包类型: ${packet.command.toString(16)}")
+                    }
                 }
             }
         }
@@ -531,17 +583,22 @@ private class AdbConnection(
     private fun handleAuth(packet: AdbPacket) {
         val type = packet.arg0
         val payload = packet.data
+        log("handleAuth: type=$type, payloadSize=${payload.size}")
         if (type == 1) {
+            log("使用私钥签名")
             val keys = getOrCreateKeys()
             val signature = Signature.getInstance("SHA1withRSA")
             signature.initSign(keys.private)
             signature.update(payload)
             val signed = signature.sign()
             sendPacket(AdbCommand.AUTH, 2, 0, signed)
+            log("签名已发送")
         } else {
+            log("发送公钥")
             val keys = getOrCreateKeys()
             val publicKey = encodePublicKey(keys.public)
             sendPacket(AdbCommand.AUTH, 3, 0, publicKey)
+            log("公钥已发送")
         }
     }
 

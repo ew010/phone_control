@@ -44,8 +44,18 @@ class _ControlHomePageState extends State<ControlHomePage> {
   int? _textureId;
   Size? _videoSize;
   String _status = '未连接';
+  String _debugLog = '';
   Offset? _panStart;
   DateTime? _panStartTime;
+
+  void _addLog(String msg) {
+    setState(() {
+      _debugLog = '$msg\n$_debugLog';
+      if (_debugLog.length > 2000) {
+        _debugLog = _debugLog.substring(0, 2000);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -65,15 +75,30 @@ class _ControlHomePageState extends State<ControlHomePage> {
   Future<void> _connect() async {
     final host = _hostController.text.trim();
     final port = int.tryParse(_portController.text.trim()) ?? 5555;
+    if (host.isEmpty) {
+      setState(() => _status = '请输入IP地址');
+      return;
+    }
     setState(() {
       _status = '连接中...';
     });
-    final ok = await _controller.connect(host, port);
-    if (!mounted) return;
-    setState(() {
-      _connected = ok;
-      _status = ok ? '已连接 $host:$port' : '连接失败';
-    });
+    _addLog('开始连接 $host:$port');
+    try {
+      final result = await _controller.connectWithLog(host, port);
+      if (!mounted) return;
+      _addLog('连接结果: ${result['success']}, 日志: ${result['log']}');
+      final ok = result['success'] as bool? ?? false;
+      setState(() {
+        _connected = ok;
+        _status = ok ? '已连接 $host:$port' : '连接失败: ${result['log']}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      _addLog('连接异常: $e');
+      setState(() {
+        _status = '连接异常: $e';
+      });
+    }
   }
 
   Future<void> _disconnect() async {
@@ -99,9 +124,12 @@ class _ControlHomePageState extends State<ControlHomePage> {
     final result = await _controller.pair(host, port, code);
     if (!mounted) return;
     setState(() {
-      _status = result;
       if (result == '配对成功') {
         _hostController.text = host;
+        _portController.text = '5555';
+        _status = '配对成功，调试端口默认为5555，如连接失败请检查设备端口';
+      } else {
+        _status = result;
       }
     });
   }
@@ -197,6 +225,24 @@ class _ControlHomePageState extends State<ControlHomePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(_status, style: Theme.of(context).textTheme.bodyMedium),
+                  if (_debugLog.isNotEmpty)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(top: 4, bottom: 4),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[900],
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        _debugLog,
+                        style: const TextStyle(
+                          color: Colors.green,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -417,6 +463,17 @@ class AdbScrcpyController {
       'port': port,
     });
     return result ?? false;
+  }
+
+  Future<Map<String, dynamic>> connectWithLog(String host, int port) async {
+    final result = await _channel.invokeMethod<Map>('connectWithLog', {
+      'host': host,
+      'port': port,
+    });
+    return {
+      'success': result?['success'] ?? false,
+      'log': result?['log'] ?? '无日志',
+    };
   }
 
   Future<void> disconnect() async {
