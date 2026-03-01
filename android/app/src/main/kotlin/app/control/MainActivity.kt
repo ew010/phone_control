@@ -43,7 +43,7 @@ import kotlin.math.min
 
 class MainActivity : FlutterActivity() {
     private val executor = Executors.newSingleThreadExecutor()
-    private var scrcpySession: ScrcpySession? = null
+    private var scrcpySession: ScrcpySessionWithAdb? = null
     private lateinit var channel: MethodChannel
     private var textureRegistry: TextureRegistry? = null
     private var connectedDevice: String? = null
