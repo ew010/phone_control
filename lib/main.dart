@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 void main() {
   runApp(const AdbPhoneControlApp());
@@ -103,6 +104,26 @@ class _ControlHomePageState extends State<ControlHomePage> {
         _hostController.text = host;
       }
     });
+  }
+
+  Future<void> _scanQrCode() async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => _QrScanDialog(),
+    );
+    if (result != null && mounted) {
+      final uri = Uri.tryParse(result);
+      if (uri != null && uri.host.isNotEmpty) {
+        _pairHostController.text = uri.host;
+        if (uri.hasPort) {
+          _pairPortController.text = uri.port.toString();
+        }
+        final code = uri.queryParameters['code'] ?? uri.queryParameters['p'];
+        if (code != null) {
+          _pairCodeController.text = code;
+        }
+      }
+    }
   }
 
   Future<void> _screenOff() async {
@@ -231,6 +252,11 @@ class _ControlHomePageState extends State<ControlHomePage> {
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(labelText: '配对码'),
                         ),
+                      ),
+                      ElevatedButton.icon(
+                        onPressed: _scanQrCode,
+                        icon: const Icon(Icons.qr_code_scanner, size: 18),
+                        label: const Text('扫描'),
                       ),
                       ElevatedButton(
                         onPressed: _pair,
@@ -462,4 +488,57 @@ class AdbScrcpyController {
   }
 
   void dispose() {}
+}
+
+class _QrScanDialog extends StatefulWidget {
+  @override
+  State<_QrScanDialog> createState() => _QrScanDialogState();
+}
+
+class _QrScanDialogState extends State<_QrScanDialog> {
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+  );
+  bool _scanned = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('扫描配对二维码'),
+      content: SizedBox(
+        width: 300,
+        height: 300,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: MobileScanner(
+            controller: _controller,
+            onDetect: (capture) {
+              if (_scanned) return;
+              final barcodes = capture.barcodes;
+              for (final barcode in barcodes) {
+                final value = barcode.rawValue;
+                if (value != null) {
+                  _scanned = true;
+                  Navigator.of(context).pop(value);
+                  return;
+                }
+              }
+            },
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+      ],
+    );
+  }
 }
