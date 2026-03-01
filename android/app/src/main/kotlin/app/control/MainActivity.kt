@@ -217,38 +217,19 @@ class MainActivity : FlutterActivity() {
         if (host.isBlank() || port <= 0 || code.isBlank()) {
             return Pair(false, "配对参数不完整")
         }
-        val adbPath = findAdbBinary()
         return try {
-            val address = "$host:$port"
-            val command = if (adbPath == null) listOf("adb", "pair", address, code) else listOf(adbPath, "pair", address, code)
-            val process = ProcessBuilder(command)
-                .redirectErrorStream(true)
-                .start()
-            val output = process.inputStream.bufferedReader().readText().trim()
-            val exitCode = process.waitFor()
-            if (exitCode == 0) {
-                Pair(true, output)
+            val pairResult = AdbPairing.pair(host, port, code, applicationContext)
+            if (pairResult.first) {
+                Pair(true, "配对成功")
             } else {
-                Pair(false, if (output.isEmpty()) "配对失败" else output)
+                Pair(false, pairResult.second)
             }
         } catch (e: Exception) {
-            Pair(false, "未找到adb可执行文件")
+            Pair(false, "配对失败: ${e.message}")
         }
     }
 
     private fun findAdbBinary(): String? {
-        val candidates = listOf(
-            "/system/bin/adb",
-            "/system/xbin/adb",
-            "/data/local/tmp/adb",
-            "/data/local/adb"
-        )
-        for (path in candidates) {
-            val file = File(path)
-            if (file.exists() && file.canExecute()) {
-                return file.absolutePath
-            }
-        }
         return null
     }
 }
@@ -679,4 +660,69 @@ private fun DataInputStream.readIntLE(): Int {
 private fun DataOutputStream.writeIntLE(value: Int) {
     val buffer = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(value).array()
     write(buffer)
+}
+
+private object AdbPairing {
+    fun pair(host: String, port: Int, code: String, context: Context): Pair<Boolean, String> {
+        return try {
+            val keyPair = getOrCreateKeys(context)
+            val socket = Socket(host, port)
+            socket.soTimeout = 10000
+            
+            val outputStream = socket.getOutputStream()
+            val inputStream = socket.getInputStream()
+            
+            val header = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
+            header.putInt(0)
+            header.putInt(code.length)
+            outputStream.write(header.array())
+            outputStream.write(code.toByteArray())
+            outputStream.flush()
+            
+            val responseHeader = ByteArray(8)
+            inputStream.read(responseHeader)
+            val responseBuf = ByteBuffer.wrap(responseHeader).order(ByteOrder.LITTLE_ENDIAN)
+            val responseType = responseBuf.int
+            val responseLen = responseBuf.int
+            
+            if (responseType == 0 && responseLen > 0) {
+                val peerInfo = ByteArray(responseLen)
+                inputStream.read(peerInfo)
+                
+                val publicKey = keyPair.public.encoded
+                val keyHeader = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
+                keyHeader.putInt(1)
+                keyHeader.putInt(publicKey.size)
+                outputStream.write(keyHeader.array())
+                outputStream.write(publicKey)
+                outputStream.flush()
+                
+                socket.close()
+                Pair(true, "配对成功")
+            } else {
+                socket.close()
+                Pair(false, "配对被拒绝")
+            }
+        } catch (e: Exception) {
+            Pair(false, e.message ?: "连接失败")
+        }
+    }
+    
+    private fun getOrCreateKeys(context: Context): KeyPair {
+        val privateFile = File(context.filesDir, "adbkey")
+        val publicFile = File(context.filesDir, "adbkey.pub")
+        
+        if (privateFile.exists() && publicFile.exists()) {
+            val privateKey = KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(privateFile.readBytes()))
+            val publicKey = KeyFactory.getInstance("RSA").generatePublic(X509EncodedKeySpec(publicFile.readBytes()))
+            return KeyPair(publicKey, privateKey)
+        }
+        
+        val generator = KeyPairGenerator.getInstance("RSA")
+        generator.initialize(2048)
+        val pair = generator.generateKeyPair()
+        privateFile.writeBytes(pair.private.encoded)
+        publicFile.writeBytes(pair.public.encoded)
+        return pair
+    }
 }
