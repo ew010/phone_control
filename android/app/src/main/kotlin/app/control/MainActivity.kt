@@ -43,10 +43,10 @@ import kotlin.math.min
 
 class MainActivity : FlutterActivity() {
     private val executor = Executors.newSingleThreadExecutor()
-    private var adbConnection: AdbConnection? = null
     private var scrcpySession: ScrcpySession? = null
     private lateinit var channel: MethodChannel
     private var textureRegistry: TextureRegistry? = null
+    private var connectedDevice: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -75,8 +75,10 @@ class MainActivity : FlutterActivity() {
                 "disconnect" -> {
                     executor.submit {
                         stopMirrorInternal()
-                        adbConnection?.close()
-                        adbConnection = null
+                        connectedDevice?.let { device ->
+                            runAdbCommand(arrayOf("disconnect", device))
+                        }
+                        connectedDevice = null
                         runOnUiThread { result.success(null) }
                     }
                 }
@@ -115,7 +117,7 @@ class MainActivity : FlutterActivity() {
                     val x = call.argument<Int>("x") ?: 0
                     val y = call.argument<Int>("y") ?: 0
                     executor.submit {
-                        adbConnection?.shell("input tap $x $y")
+                        runAdbShell("input tap $x $y")
                         runOnUiThread { result.success(null) }
                     }
                 }
@@ -126,14 +128,14 @@ class MainActivity : FlutterActivity() {
                     val y2 = call.argument<Int>("y2") ?: 0
                     val duration = call.argument<Int>("durationMs") ?: 300
                     executor.submit {
-                        adbConnection?.shell("input swipe $x1 $y1 $x2 $y2 $duration")
+                        runAdbShell("input swipe $x1 $y1 $x2 $y2 $duration")
                         runOnUiThread { result.success(null) }
                     }
                 }
                 "keycode" -> {
                     val keycode = call.argument<Int>("keycode") ?: 0
                     executor.submit {
-                        adbConnection?.shell("input keyevent $keycode")
+                        runAdbShell("input keyevent $keycode")
                         runOnUiThread { result.success(null) }
                     }
                 }
@@ -141,19 +143,19 @@ class MainActivity : FlutterActivity() {
                     val text = call.argument<String>("text") ?: ""
                     executor.submit {
                         val escaped = text.replace(" ", "%s")
-                        adbConnection?.shell("input text \"$escaped\"")
+                        runAdbShell("input text \"$escaped\"")
                         runOnUiThread { result.success(null) }
                     }
                 }
                 "screenOff" -> {
                     executor.submit {
-                        adbConnection?.shell("input keyevent 223")
+                        runAdbShell("input keyevent 223")
                         runOnUiThread { result.success(null) }
                     }
                 }
                 "screenOn" -> {
                     executor.submit {
-                        adbConnection?.shell("input keyevent 224")
+                        runAdbShell("input keyevent 224")
                         runOnUiThread { result.success(null) }
                     }
                 }
@@ -202,16 +204,8 @@ class MainActivity : FlutterActivity() {
                          output.contains("already connected", ignoreCase = true)
             
             if (success) {
-                // 创建AdbConnection用于后续shell命令
-                try {
-                    val connection = AdbConnection(host, port, applicationContext)
-                    connection.connect()
-                    adbConnection?.close()
-                    adbConnection = connection
-                    logBuilder.appendLine("内部ADB连接已建立")
-                } catch (e: Exception) {
-                    logBuilder.appendLine("警告: 内部ADB连接失败: ${e.message}")
-                }
+                connectedDevice = address
+                logBuilder.appendLine("设备已连接: $address")
             }
             
             Pair(success, logBuilder.toString())
@@ -219,6 +213,24 @@ class MainActivity : FlutterActivity() {
             val errorMsg = "连接失败: ${e.message}"
             logBuilder.appendLine(errorMsg)
             Pair(false, logBuilder.toString())
+        }
+    }
+    
+    private fun runAdbShell(command: String): String {
+        return runAdbCommand(arrayOf("shell", command))
+    }
+    
+    private fun runAdbCommand(args: Array<String>): String {
+        val adbPath = getAdbBinaryPath(applicationContext) ?: return ""
+        return try {
+            val pb = ProcessBuilder(listOf(adbPath) + args)
+            pb.directory(applicationContext.filesDir)
+            pb.redirectErrorStream(true)
+            pb.environment()["HOME"] = applicationContext.filesDir.absolutePath
+            val process = pb.start()
+            process.inputStream.bufferedReader().readText()
+        } catch (e: Exception) {
+            ""
         }
     }
     
@@ -250,25 +262,8 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun startMirrorInternal(maxSize: Int, maxFps: Int, bitRate: Int): Map<String, Any>? {
-        val connection = adbConnection ?: return null
-        if (scrcpySession != null) return null
-        val scrcpyJar = ensureScrcpyServer(applicationContext) ?: return null
-        val textureRegistry = this.textureRegistry ?: return null
-        return try {
-            val session = ScrcpySession(
-                textureRegistry,
-                connection,
-                scrcpyJar,
-                maxSize,
-                maxFps,
-                bitRate
-            )
-            val info = session.start()
-            scrcpySession = session
-            info
-        } catch (e: Exception) {
-            null
-        }
+        // 镜像功能需要自定义ADB连接，暂时禁用
+        return null
     }
 
     private fun stopMirrorInternal() {
