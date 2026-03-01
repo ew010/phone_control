@@ -664,29 +664,40 @@ private fun DataOutputStream.writeIntLE(value: Int) {
 
 private object AdbPairing {
     fun pair(host: String, port: Int, code: String, context: Context): Pair<Boolean, String> {
-        val adbPath = findAdbBinary()
+        val adbPath = getAdbBinary(context)
         
-        if (adbPath != null) {
-            return pairWithAdb(adbPath, host, port, code)
+        if (adbPath == null) {
+            return Pair(false, "无法获取adb工具")
         }
         
-        return Pair(false, "此设备没有adb工具，请手动配对：\n1. 在电脑上安装adb\n2. 运行: adb pair $host:$port\n3. 输入配对码: $code\n4. 配对成功后在此App点击连接")
+        return pairWithAdb(adbPath, host, port, code)
     }
     
-    private fun findAdbBinary(): String? {
-        val candidates = listOf(
-            "/system/bin/adb",
-            "/system/xbin/adb",
-            "/vendor/bin/adb",
-            "/data/local/tmp/adb"
-        )
-        for (path in candidates) {
-            val file = File(path)
-            if (file.exists() && file.canExecute()) {
-                return file.absolutePath
+    private fun getAdbBinary(context: Context): String? {
+        val abi = Build.SUPPORTED_ABIS[0]
+        val assetName = when {
+            abi.contains("arm64") -> "adb-arm64"
+            abi.contains("arm") -> "adb-arm"
+            else -> return null
+        }
+        
+        val adbFile = File(context.filesDir, "adb")
+        
+        if (!adbFile.exists() || adbFile.length() == 0L) {
+            try {
+                context.assets.open(assetName).use { input ->
+                    adbFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                adbFile.setExecutable(true, false)
+                adbFile.setReadable(true, false)
+            } catch (e: Exception) {
+                return null
             }
         }
-        return null
+        
+        return if (adbFile.canExecute()) adbFile.absolutePath else null
     }
     
     private fun pairWithAdb(adbPath: String, host: String, port: Int, code: String): Pair<Boolean, String> {
