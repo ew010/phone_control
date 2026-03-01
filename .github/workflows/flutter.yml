@@ -21,13 +21,9 @@ jobs:
           channel: "stable"
       - name: Pub get
         run: flutter pub get
-        working-directory: adb_phone_control
       - name: Analyze
         run: flutter analyze
-        working-directory: adb_phone_control
       - name: Test
         run: flutter test
-        working-directory: adb_phone_control
       - name: Build APK
         run: flutter build apk --release
-        working-directory: adb_phone_control
