@@ -1,0 +1,457 @@
+import 'dart:math';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+void main() {
+  runApp(const AdbPhoneControlApp());
+}
+
+class AdbPhoneControlApp extends StatelessWidget {
+  const AdbPhoneControlApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'ADB Phone Control',
+      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo)),
+      home: const ControlHomePage(),
+    );
+  }
+}
+
+class ControlHomePage extends StatefulWidget {
+  const ControlHomePage({super.key});
+
+  @override
+  State<ControlHomePage> createState() => _ControlHomePageState();
+}
+
+class _ControlHomePageState extends State<ControlHomePage> {
+  final _controller = AdbScrcpyController();
+  final _hostController = TextEditingController(text: '192.168.0.100');
+  final _portController = TextEditingController(text: '5555');
+  final _pairHostController = TextEditingController(text: '192.168.0.100');
+  final _pairPortController = TextEditingController(text: '37099');
+  final _pairCodeController = TextEditingController();
+  final _maxSizeController = TextEditingController(text: '1024');
+  final _maxFpsController = TextEditingController(text: '30');
+  final _bitRateController = TextEditingController(text: '8000000');
+  final _textController = TextEditingController();
+  bool _connected = false;
+  bool _streaming = false;
+  int? _textureId;
+  Size? _videoSize;
+  String _status = '未连接';
+  Offset? _panStart;
+  DateTime? _panStartTime;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _hostController.dispose();
+    _portController.dispose();
+    _pairHostController.dispose();
+    _pairPortController.dispose();
+    _pairCodeController.dispose();
+    _maxSizeController.dispose();
+    _maxFpsController.dispose();
+    _bitRateController.dispose();
+    _textController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _connect() async {
+    final host = _hostController.text.trim();
+    final port = int.tryParse(_portController.text.trim()) ?? 5555;
+    setState(() {
+      _status = '连接中...';
+    });
+    final ok = await _controller.connect(host, port);
+    if (!mounted) return;
+    setState(() {
+      _connected = ok;
+      _status = ok ? '已连接 $host:$port' : '连接失败';
+    });
+  }
+
+  Future<void> _disconnect() async {
+    await _controller.disconnect();
+    if (!mounted) return;
+    setState(() {
+      _connected = false;
+      _streaming = false;
+      _textureId = null;
+      _videoSize = null;
+      _status = '已断开';
+    });
+  }
+
+  Future<void> _pair() async {
+    final host = _pairHostController.text.trim();
+    final port = int.tryParse(_pairPortController.text.trim()) ?? 37099;
+    final code = _pairCodeController.text.trim();
+    if (code.isEmpty) return;
+    setState(() {
+      _status = '配对中...';
+    });
+    final result = await _controller.pair(host, port, code);
+    if (!mounted) return;
+    setState(() {
+      _status = result;
+    });
+  }
+
+  Future<void> _screenOff() async {
+    await _controller.screenOff();
+  }
+
+  Future<void> _screenOn() async {
+    await _controller.screenOn();
+  }
+
+  Future<void> _startMirror() async {
+    final maxSize = int.tryParse(_maxSizeController.text.trim()) ?? 1024;
+    final maxFps = int.tryParse(_maxFpsController.text.trim()) ?? 30;
+    final bitRate = int.tryParse(_bitRateController.text.trim()) ?? 8000000;
+    setState(() {
+      _status = '启动镜像中...';
+    });
+    final session = await _controller.startMirror(
+      maxSize: maxSize,
+      maxFps: maxFps,
+      bitRate: bitRate,
+    );
+    if (!mounted) return;
+    setState(() {
+      _textureId = session?.textureId;
+      _videoSize = session == null ? null : Size(session.width.toDouble(), session.height.toDouble());
+      _streaming = session != null;
+      _status = session == null ? '启动失败' : '镜像中 ${session.width}x${session.height}';
+    });
+  }
+
+  Future<void> _stopMirror() async {
+    await _controller.stopMirror();
+    if (!mounted) return;
+    setState(() {
+      _streaming = false;
+      _textureId = null;
+      _videoSize = null;
+      _status = '镜像已停止';
+    });
+  }
+
+  Future<void> _sendText() async {
+    final text = _textController.text;
+    if (text.isEmpty) return;
+    await _controller.sendText(text);
+    _textController.clear();
+  }
+
+  Offset _mapToDevice(Offset local, Size viewSize) {
+    final videoSize = _videoSize;
+    if (videoSize == null) return local;
+    final scaleX = videoSize.width / viewSize.width;
+    final scaleY = videoSize.height / viewSize.height;
+    return Offset(local.dx * scaleX, local.dy * scaleY);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canControl = _connected && _streaming;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('ADB + scrcpy 控制器'),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_status, style: Theme.of(context).textTheme.bodyMedium),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _hostController,
+                          decoration: const InputDecoration(labelText: '目标IP'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 100,
+                        child: TextField(
+                          controller: _portController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: '端口'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _connected ? _disconnect : _connect,
+                        child: Text(_connected ? '断开' : '连接'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _pairHostController,
+                          decoration: const InputDecoration(labelText: '配对IP'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 110,
+                        child: TextField(
+                          controller: _pairPortController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: '配对端口'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 140,
+                        child: TextField(
+                          controller: _pairCodeController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: '配对码'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _pair,
+                        child: const Text('配对'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 110,
+                        child: TextField(
+                          controller: _maxSizeController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: '最大分辨率'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 110,
+                        child: TextField(
+                          controller: _maxFpsController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: '最大FPS'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 130,
+                        child: TextField(
+                          controller: _bitRateController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: '码率'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _streaming ? _stopMirror : (_connected ? _startMirror : null),
+                        child: Text(_streaming ? '停止镜像' : '启动镜像'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final viewSize = Size(constraints.maxWidth, constraints.maxHeight);
+                  return Container(
+                    color: Colors.black,
+                    child: _textureId == null
+                        ? const Center(child: Text('未开始镜像', style: TextStyle(color: Colors.white)))
+                        : GestureDetector(
+                            onTapDown: canControl
+                                ? (details) async {
+                                    final mapped = _mapToDevice(details.localPosition, viewSize);
+                                    await _controller.tap(mapped.dx.round(), mapped.dy.round());
+                                  }
+                                : null,
+                            onPanStart: canControl
+                                ? (details) {
+                                    _panStart = details.localPosition;
+                                    _panStartTime = DateTime.now();
+                                  }
+                                : null,
+                            onPanEnd: canControl
+                                ? (details) async {
+                                    final start = _panStart;
+                                    final startTime = _panStartTime;
+                                    if (start == null || startTime == null) return;
+                                    final velocity = details.velocity.pixelsPerSecond;
+                                    final endPoint = start + Offset(
+                                      velocity.dx.sign * min(200, velocity.distance),
+                                      velocity.dy.sign * min(200, velocity.distance),
+                                    );
+                                    final duration = DateTime.now().difference(startTime).inMilliseconds;
+                                    final mappedStart = _mapToDevice(start, viewSize);
+                                    final mappedEnd = _mapToDevice(endPoint, viewSize);
+                                    await _controller.swipe(
+                                      mappedStart.dx.round(),
+                                      mappedStart.dy.round(),
+                                      mappedEnd.dx.round(),
+                                      mappedEnd.dy.round(),
+                                      max(200, duration),
+                                    );
+                                    _panStart = null;
+                                    _panStartTime = null;
+                                  }
+                                : null,
+                            child: Texture(textureId: _textureId!),
+                          ),
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _textController,
+                      decoration: const InputDecoration(labelText: '输入文本'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _connected ? _sendText : null,
+                    child: const Text('发送'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _connected ? () => _controller.sendKeycode(4) : null,
+                    child: const Text('返回'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _connected ? () => _controller.sendKeycode(3) : null,
+                    child: const Text('主页'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _connected ? _screenOff : null,
+                    child: const Text('熄屏'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _connected ? _screenOn : null,
+                    child: const Text('亮屏'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class MirrorSession {
+  MirrorSession({required this.textureId, required this.width, required this.height});
+  final int textureId;
+  final int width;
+  final int height;
+}
+
+class AdbScrcpyController {
+  static const MethodChannel _channel = MethodChannel('adb_phone_control');
+
+  Future<bool> connect(String host, int port) async {
+    final result = await _channel.invokeMethod<bool>('connect', {
+      'host': host,
+      'port': port,
+    });
+    return result ?? false;
+  }
+
+  Future<void> disconnect() async {
+    await _channel.invokeMethod('disconnect');
+  }
+
+  Future<MirrorSession?> startMirror({
+    required int maxSize,
+    required int maxFps,
+    required int bitRate,
+  }) async {
+    final result = await _channel.invokeMethod<Map>('startMirror', {
+      'maxSize': maxSize,
+      'maxFps': maxFps,
+      'bitRate': bitRate,
+    });
+    if (result == null) return null;
+    return MirrorSession(
+      textureId: result['textureId'] as int,
+      width: result['width'] as int,
+      height: result['height'] as int,
+    );
+  }
+
+  Future<void> stopMirror() async {
+    await _channel.invokeMethod('stopMirror');
+  }
+
+  Future<void> tap(int x, int y) async {
+    await _channel.invokeMethod('tap', {'x': x, 'y': y});
+  }
+
+  Future<void> swipe(int x1, int y1, int x2, int y2, int durationMs) async {
+    await _channel.invokeMethod('swipe', {
+      'x1': x1,
+      'y1': y1,
+      'x2': x2,
+      'y2': y2,
+      'durationMs': durationMs,
+    });
+  }
+
+  Future<void> sendKeycode(int keycode) async {
+    await _channel.invokeMethod('keycode', {'keycode': keycode});
+  }
+
+  Future<void> sendText(String text) async {
+    await _channel.invokeMethod('text', {'text': text});
+  }
+
+  Future<String> pair(String host, int port, String code) async {
+    final result = await _channel.invokeMethod<Map>('pair', {
+      'host': host,
+      'port': port,
+      'code': code,
+    });
+    if (result == null) return '配对失败';
+    final success = result['success'] as bool? ?? false;
+    final message = result['message'] as String? ?? '';
+    return success ? '配对成功' : (message.isEmpty ? '配对失败' : message);
+  }
+
+  Future<void> screenOff() async {
+    await _channel.invokeMethod('screenOff');
+  }
+
+  Future<void> screenOn() async {
+    await _channel.invokeMethod('screenOn');
+  }
+
+  void dispose() {}
+}
