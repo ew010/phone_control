@@ -262,8 +262,28 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun startMirrorInternal(maxSize: Int, maxFps: Int, bitRate: Int): Map<String, Any>? {
-        // 镜像功能需要自定义ADB连接，暂时禁用
-        return null
+        if (scrcpySession != null) return null
+        if (connectedDevice == null) return null
+        val scrcpyJar = ensureScrcpyServer(applicationContext) ?: return null
+        val textureRegistry = this.textureRegistry ?: return null
+        val adbPath = getAdbBinaryPath(applicationContext) ?: return null
+        return try {
+            val session = ScrcpySessionWithAdb(
+                textureRegistry,
+                adbPath,
+                applicationContext.filesDir,
+                scrcpyJar,
+                maxSize,
+                maxFps,
+                bitRate
+            )
+            val info = session.start()
+            scrcpySession = session
+            info
+        } catch (e: Exception) {
+            Log.e("Scrcpy", "启动镜像失败: ${e.message}", e)
+            null
+        }
     }
 
     private fun stopMirrorInternal() {
@@ -312,6 +332,119 @@ class MainActivity : FlutterActivity() {
 
     private fun findAdbBinary(): String? {
         return null
+    }
+}
+
+private class ScrcpySessionWithAdb(
+    private val textureRegistry: TextureRegistry,
+    private val adbPath: String,
+    private val workingDir: File,
+    private val scrcpyJar: File,
+    private val maxSize: Int,
+    private val maxFps: Int,
+    private val bitRate: Int
+) {
+    private var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
+    private var serverSocket: ServerSocket? = null
+    private var socket: Socket? = null
+    private var decoder: ScrcpyVideoDecoder? = null
+    private val stopped = AtomicBoolean(false)
+
+    fun start(): Map<String, Any>? {
+        val port = 27183
+        
+        // 使用adb push推送文件
+        runAdb(arrayOf("push", scrcpyJar.absolutePath, "/data/local/tmp/scrcpy-server.jar"))
+        
+        // 使用adb reverse设置端口转发
+        runAdb(arrayOf("reverse", "localabstract:scrcpy", "tcp:$port"))
+        
+        val scid = (Math.random() * Int.MAX_VALUE).toInt()
+        val cmd = listOf(
+            "CLASSPATH=/data/local/tmp/scrcpy-server.jar",
+            "app_process / com.genymobile.scrcpy.Server 3.3.4",
+            "scid=$scid",
+            "log_level=info",
+            "audio=false",
+            "control=false",
+            "send_device_meta=false",
+            "send_frame_meta=true",
+            "video_codec=h264",
+            "tunnel_forward=true",
+            "tunnel_port=$port",
+            "max_size=$maxSize",
+            "max_fps=$maxFps",
+            "bit_rate=$bitRate"
+        ).joinToString(" ")
+        
+        // 启动scrcpy服务
+        runAdbShell("$cmd >/dev/null 2>/dev/null &")
+        
+        // 等待服务启动
+        Thread.sleep(500)
+        
+        serverSocket = ServerSocket(port)
+        serverSocket?.reuseAddress = true
+        serverSocket?.soTimeout = 10000
+        socket = serverSocket?.accept()
+        val input = BufferedInputStream(socket!!.getInputStream())
+        val meta = ByteArray(12)
+        if (!readFully(input, meta)) return null
+        val metaBuf = ByteBuffer.wrap(meta).order(ByteOrder.BIG_ENDIAN)
+        val codecId = metaBuf.int
+        val width = metaBuf.int
+        val height = metaBuf.int
+        if (codecId == 0) return null
+        val texture = textureRegistry.createSurfaceTexture()
+        textureEntry = texture
+        val surfaceTexture = texture.surfaceTexture()
+        surfaceTexture.setDefaultBufferSize(width, height)
+        val surface = Surface(surfaceTexture)
+        val videoDecoder = ScrcpyVideoDecoder(surface, input)
+        decoder = videoDecoder
+        videoDecoder.start(width, height)
+        return mapOf("textureId" to texture.id(), "width" to width, "height" to height)
+    }
+
+    fun stop() {
+        if (stopped.getAndSet(true)) return
+        decoder?.stop()
+        socket?.close()
+        serverSocket?.close()
+        textureEntry?.release()
+        decoder = null
+        socket = null
+        serverSocket = null
+        textureEntry = null
+        // 清除reverse转发
+        runAdb(arrayOf("reverse", "--remove", "localabstract:scrcpy"))
+    }
+
+    private fun runAdb(args: Array<String>): String {
+        return try {
+            val pb = ProcessBuilder(listOf(adbPath) + args)
+            pb.directory(workingDir)
+            pb.redirectErrorStream(true)
+            pb.environment()["HOME"] = workingDir.absolutePath
+            val process = pb.start()
+            process.inputStream.bufferedReader().readText()
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun runAdbShell(command: String): String {
+        return runAdb(arrayOf("shell", command))
+    }
+
+    private fun readFully(input: InputStream, buffer: ByteArray): Boolean {
+        var offset = 0
+        while (offset < buffer.size) {
+            val read = input.read(buffer, offset, buffer.size - offset)
+            if (read <= 0) return false
+            offset += read
+        }
+        return true
     }
 }
 
