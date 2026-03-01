@@ -166,7 +166,7 @@ class MainActivity : FlutterActivity() {
         val scrcpyJar = ensureScrcpyServer(applicationContext) ?: return null
         return try {
             val session = ScrcpySession(
-                flutterEngine!!.textureRegistry,
+                textureRegistry,
                 connection,
                 scrcpyJar,
                 maxSize,
