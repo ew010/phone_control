@@ -278,9 +278,12 @@ class MainActivity : FlutterActivity() {
         if (!dir.exists()) dir.mkdirs()
         val jar = File(dir, "scrcpy-server.jar")
         if (jar.exists() && jar.length() > 0) return jar
-        val url = URL("https://github.com/Genymobile/scrcpy/releases/download/v3.3.4/scrcpy-server-v3.3.4.jar")
         return try {
-            url.openStream().use { input ->
+            val url = URL("https://github.com/Genymobile/scrcpy/releases/download/v3.3.4/scrcpy-server-v3.3.4.jar")
+            val connection = url.openConnection()
+            connection.connectTimeout = 30000
+            connection.readTimeout = 60000
+            connection.getInputStream().use { input ->
                 FileOutputStream(jar).use { output ->
                     val buffer = ByteArray(16 * 1024)
                     while (true) {
@@ -292,6 +295,7 @@ class MainActivity : FlutterActivity() {
             }
             jar
         } catch (e: Exception) {
+            Log.e("Scrcpy", "下载scrcpy-server失败: ${e.message}")
             null
         }
     }
@@ -387,15 +391,21 @@ private class ScrcpySessionWithAdb(
     fun stop() {
         if (stopped.getAndSet(true)) return
         decoder?.stop()
-        socket?.close()
-        serverSocket?.close()
+        try {
+            socket?.close()
+        } catch (_: Exception) {}
+        try {
+            serverSocket?.close()
+        } catch (_: Exception) {}
         textureEntry?.release()
         decoder = null
         socket = null
         serverSocket = null
         textureEntry = null
-        // 清除reverse转发
-        runAdb(arrayOf("reverse", "--remove", "localabstract:scrcpy"))
+        // 清除reverse转发（忽略错误）
+        try {
+            runAdb(arrayOf("reverse", "--remove", "localabstract:scrcpy"))
+        } catch (_: Exception) {}
     }
 
     private fun runAdb(args: Array<String>): String {
